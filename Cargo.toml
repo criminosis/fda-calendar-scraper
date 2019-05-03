@@ -1,0 +1,9 @@
+[package]
+name = "fda_calendar_scraper"
+version = "0.1.0"
+authors = ["Allan Clements <criminosis@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+scraper = "0.10.0"
+reqwest = "0.9.16"
