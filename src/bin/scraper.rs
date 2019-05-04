@@ -11,7 +11,7 @@ use std::env;
 
 fn main() {
     env_logger::builder()
-        .filter_level(LevelFilter::Info)
+        .filter_level(LevelFilter::Info) //defaults to error otherwise
 //        .filter_module("lettre", LevelFilter::Debug)
 //        .filter_module("lettre_email", LevelFilter::Debug)
         .init();
@@ -33,7 +33,7 @@ fn send_email() {
     let smtp_password = &env::var("GMAIL_PASSWORD").unwrap()[..];
 
     let email = Email::builder()
-        .to((to_address))
+        .to(to_address)
         .from(smtp_username)
         .subject("Hi, Hello world")
         .text("Hello world.")
