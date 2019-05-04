@@ -6,4 +6,10 @@ edition = "2018"
 
 [dependencies]
 scraper = "0.10.0"
+#Doesn't seem lettre exposes that it uses native-tls so compiler was wanting to use the static linked one from request
+native-tls = "0.2.3"
 reqwest = "0.9.16"
+lettre = "0.9"
+lettre_email = "0.9"
+env_logger = "0.6.1"
+log = "0.4.6"

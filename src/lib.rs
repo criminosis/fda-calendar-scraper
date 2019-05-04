@@ -5,23 +5,23 @@ mod tests {
     use std::io::Write;
 
     //TODO we need to import the module for unit testing?
-    use crate::fda_scraper::parse;
-
+    use crate::fda_scraper::{parse};
 
     #[test]
     fn test() {
         let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_download.html");
         parse(path.to_str().unwrap());
     }
-//    #[test]
-//    fn test2() {
-    //Demo code for downloading the document, for testing this was stored after downloading
-//        let body = reqwest::get("https://www.biopharmcatalyst.com/calendars/fda-calendar").unwrap().text().unwrap();
-//
-//        let mut file = File::create("fda_calendar_download.html").unwrap();
-//        file.write_all(body.as_bytes()).unwrap();
-//        println!("body = {:?}", body);
-//    }
+
+    #[test]
+    fn test2() {
+        //Demo code for downloading the document, for testing this was stored after downloading
+        let body = reqwest::get("https://www.biopharmcatalyst.com/calendars/fda-calendar").unwrap().text().unwrap();
+
+        let mut file = File::create("fda_calendar_download.html").unwrap();
+        file.write_all(body.as_bytes()).unwrap();
+        println!("body = {:?}", body);
+    }
 }
 
 pub mod fda_scraper {
@@ -60,4 +60,6 @@ pub mod fda_scraper {
             println!("Symbol: {} Price: {} Url: {} Date: {}, Drug: {}, Indication: {}, Catalyst: {}, Phase: {}", symbol, price, url, catalyst_date, drug_name, drug_indication, catalyst_note, phase);
         }
     }
+
+
 }
