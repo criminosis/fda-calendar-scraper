@@ -19,6 +19,8 @@ fn main() {
     warn!("Test warn");
     error!("Test error");
     send_email()
+
+    //TODO log how long it took to do a run. Separate out processing time and emailing time and then do total
 }
 
 

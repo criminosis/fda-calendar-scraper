@@ -19,11 +19,22 @@ pub mod fda_scraper {
         phase: String,
     }
 
+    /*
+    Iterating bounds of dataset
+     for ( ref key, ref value) in map.range((Included(("foo".to_string(), "c".to_string())), Excluded(("g".to_string(), "".to_string())))) {
+    println!("{:?}: {}", key, value);
+    }
+    */
+
     #[derive(Debug, Eq, PartialEq)]
     pub struct ScrapedCatalysts {
+        //TODO convert the string to PhaseLabel new type?
         catalysts: BTreeMap<(String, NaiveDate), Vec<ParsedRow>>
         //TODO we need to do some kind of filtering by the price?
+        //  The into() conversation, while cool, may be a bad match here because we want to also include price in filtering
+        //  We'd also want to apply a time filtering to say when to maybe early out the iterator (assuming it's date ordered)
         //TODO implement SendableEmail to turn this returned type into an email to send
+        //  can we get the first entry, and then submap all the matching entries for a given phase, then tail map to the next batch?
     }
 
     impl From<Html> for ScrapedCatalysts {
@@ -115,6 +126,7 @@ pub mod fda_scraper {
             let actual = parse(path.to_str().unwrap());
 
 
+            //TODO lots of to_string here. Rust code smell that we should be using more lifetimes?
             let expected_row = ParsedRow {
                 price: Currency::from_str("$1.26").unwrap(),
                 url: "https://www.biopharmcatalyst.com/company/BTX".to_string(),
@@ -131,6 +143,10 @@ pub mod fda_scraper {
             let expected = ScrapedCatalysts {
                 catalysts
             };
+
+            //TODO add another row with the same phase and date
+            //TODO add a row with a different phase
+            //Add range selection to demonstrate getting submap.
 
             assert_eq!(actual.unwrap(), expected);
         }
