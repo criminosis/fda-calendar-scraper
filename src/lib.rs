@@ -29,6 +29,7 @@ pub mod fda_scraper {
         ExpectedFieldNotFound(Selector),
         DateParseFailure(chrono::format::ParseError),
         FileReadError(io::Error),
+        MalformedCurrency,
         CurrencyParseError(currency::ParseCurrencyError),
     }
 
@@ -37,6 +38,7 @@ pub mod fda_scraper {
             match *self {
                 ScrapeError::ExpectedFieldNotFound(ref e) => write!(f, "Didn't match css selector {:?}", e),
                 ScrapeError::InvalidSelector(ref e) => write!(f, "Malformed CSS Selector {:?}", e),
+                ScrapeError::MalformedCurrency => write!(f, "Malformed Currency"),
                 // This is a wrapper, so defer to the underlying types' implementation of `fmt`.
                 //ScrapeError::InvalidSelector(ref e) => e.fmt(f),
 
@@ -56,6 +58,7 @@ pub mod fda_scraper {
                 // underlying type already implements the `Error` trait.
                 ScrapeError::ExpectedFieldNotFound(_) => None,
                 ScrapeError::InvalidSelector(_) => None,
+                ScrapeError::MalformedCurrency => None,
                 ScrapeError::DateParseFailure(ref e) => Some(e),
                 ScrapeError::FileReadError(ref e) => Some(e),
                 ScrapeError::CurrencyParseError(ref e) => Some(e),
@@ -134,12 +137,20 @@ pub mod fda_scraper {
             let catalyst_note = build_selector_for("div[class=catalyst-note]")?;
             let phase = build_selector_for("td.js-td--stage[data-value]")?;
 
+            let currency_value_check = Currency::from_str("").unwrap();
+
             let mut catalysts = BTreeMap::new();
             for an_event_table_row in document.select(&event_table_row_selector) {
 
                 let price = select_first_text_from(&an_event_table_row, &price)
                     .and_then(|x| Currency::from_str(&x)
                         .map_err(|x| ScrapeError::CurrencyParseError(x)))?;
+
+                //Currency error detection sucks, turns "-----" into a no digit currency with no symbol
+                println!("Got price: {:?}", price.value());
+                if price == currency_value_check {
+                    return Err(ScrapeError::MalformedCurrency)
+                }
 
                 let url_symbol_ref = select_first_element_from(&an_event_table_row, &symbol_and_url)
                     .ok_or_else(||ScrapeError::ExpectedFieldNotFound(symbol_and_url.clone()))?;
@@ -186,8 +197,6 @@ pub mod fda_scraper {
     #[cfg(test)]
     mod tests {
         use std::path::Path;
-        use std::fs::File;
-        use std::io::Write;
 
         use super::*;
         use std::collections::btree_map::BTreeMap;
@@ -195,8 +204,28 @@ pub mod fda_scraper {
         use currency::Currency;
 
 
-        //TODO add test case that errors thrown with malformed currency & dates
         //TODO add test case given some time & price filtering
+        #[test]
+        #[should_panic(expected = "Failed to parse date")]
+        fn parse_malformed_time() {
+            let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_date.html");
+            match parse(path.to_str().unwrap()) {
+                Err(ScrapeError::DateParseFailure(_)) => panic!("Failed to parse date"),
+                x => panic!("Unexpected result {:?}", x)
+            }
+        }
+
+        #[test]
+        #[should_panic(expected = "Failed to parse currency")]
+        fn parse_malformed_price() {
+            let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_price.html");
+            match parse(path.to_str().unwrap()) {
+                Err(ScrapeError::MalformedCurrency) => panic!("Failed to parse currency"),
+                x => panic!("Unexpected result {:?}", x)
+            }
+        }
+
+
         #[test]
         fn parse_sample() {
             let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_sample.html");
