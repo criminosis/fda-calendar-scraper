@@ -1,3 +1,5 @@
+mod currency; //Declares that we have a module called currency in file currency.rs in src/
+
 pub mod fda_scraper {
     use std::fs;
     use scraper::{Html, Selector};
@@ -9,6 +11,7 @@ pub mod fda_scraper {
     use std::error;
     use std::io;
     use scraper::ElementRef;
+    use super::currency as my_currency;
 
     #[derive(Debug, Eq, PartialEq)]
     struct ParsedRow {
@@ -38,7 +41,7 @@ pub mod fda_scraper {
             match *self {
                 ScrapeError::ExpectedFieldNotFound(ref e) => write!(f, "Didn't match css selector {:?}", e),
                 ScrapeError::InvalidSelector(ref e) => write!(f, "Malformed CSS Selector {:?}", e),
-                ScrapeError::MalformedCurrency => write!(f, "Malformed Currency"),
+                ScrapeError::MalformedCurrency => write!(f, "Malformed currency"),
                 // This is a wrapper, so defer to the underlying types' implementation of `fmt`.
                 //ScrapeError::InvalidSelector(ref e) => e.fmt(f),
 
@@ -146,7 +149,7 @@ pub mod fda_scraper {
                     .and_then(|x| Currency::from_str(&x)
                         .map_err(|x| ScrapeError::CurrencyParseError(x)))?;
 
-                //Currency error detection sucks, turns "-----" into a no digit currency with no symbol
+                //currency error detection sucks, turns "-----" into a no digit currency with no symbol
                 println!("Got price: {:?}", price.value());
                 if price == currency_value_check {
                     return Err(ScrapeError::MalformedCurrency)
