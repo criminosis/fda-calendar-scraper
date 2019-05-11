@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, error};
 use crate::currency::USDParseError::{NoDollarSign, InvalidStructure, DecimalWithInsufficientCents};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -74,6 +74,26 @@ impl USD {
         else {
             //We had a 2nd decimal position, this is invalid
             Err(InvalidStructure(usd_original.to_string()))
+        }
+    }
+}
+
+impl error::Error for USDParseError {
+    fn cause(&self) -> Option<&error::Error> {
+        match self {
+            USDParseError::DecimalWithInsufficientCents(_) => None,
+            USDParseError::InvalidStructure(_) => None,
+            USDParseError::NoDollarSign(_) => None
+        }
+    }
+}
+
+impl fmt::Display for USDParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            USDParseError::DecimalWithInsufficientCents(malformed_input) => write!(f, "Not enough decimal places {}", malformed_input),
+            USDParseError::InvalidStructure(malformed_input) => write!(f, "Invalid structure {}", malformed_input),
+            USDParseError::NoDollarSign(malformed_input) => write!(f, "No dollar sign {}", malformed_input),
         }
     }
 }

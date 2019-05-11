@@ -5,17 +5,16 @@ pub mod fda_scraper {
     use scraper::{Html, Selector};
     use chrono::NaiveDate;
     use std::collections::BTreeMap;
-    use currency::Currency;
     use log::{info, error};
     use std::fmt;
     use std::error;
     use std::io;
     use scraper::ElementRef;
-    use super::currency as my_currency;
+    use super::currency;
 
     #[derive(Debug, Eq, PartialEq)]
     struct ParsedRow {
-        price: Currency,
+        price: currency::USD,
         url: String,
         symbol: String,
         catalyst_date: NaiveDate,
@@ -33,7 +32,7 @@ pub mod fda_scraper {
         DateParseFailure(chrono::format::ParseError),
         FileReadError(io::Error),
         MalformedCurrency,
-        CurrencyParseError(currency::ParseCurrencyError),
+        CurrencyParseError(currency::USDParseError),
     }
 
     impl fmt::Display for ScrapeError {
@@ -130,7 +129,7 @@ pub mod fda_scraper {
 
     impl ScrapedCatalysts {
         //Should price_limit and retrieval_limit be some kind of predicates instead?
-        pub fn new(document: &Html, scrape_predicate: (Currency, NaiveDate)) -> Result<ScrapedCatalysts, ScrapeError> {
+        pub fn new(document: &Html, scrape_predicate: (currency::USD, NaiveDate)) -> Result<ScrapedCatalysts, ScrapeError> {
             let event_table_row_selector = build_selector_for("tr.js-tr.js-drug")?;
             let price = build_selector_for("div[class=price]")?;
             let symbol_and_url = build_selector_for("td a[href]")?;
@@ -140,20 +139,13 @@ pub mod fda_scraper {
             let catalyst_note = build_selector_for("div[class=catalyst-note]")?;
             let phase = build_selector_for("td.js-td--stage[data-value]")?;
 
-            let currency_value_check = Currency::from_str("").unwrap();
-
             let mut catalysts = BTreeMap::new();
             for an_event_table_row in document.select(&event_table_row_selector) {
 
                 let price = select_first_text_from(&an_event_table_row, &price)
-                    .and_then(|x| Currency::from_str(&x)
+                    .and_then(|x| currency::USD::new(&x)
                         .map_err(|x| ScrapeError::CurrencyParseError(x)))?;
 
-                //currency error detection sucks, turns "-----" into a no digit currency with no symbol
-                println!("Got price: {:?}", price.value());
-                if price == currency_value_check {
-                    return Err(ScrapeError::MalformedCurrency)
-                }
 
                 let url_symbol_ref = select_first_element_from(&an_event_table_row, &symbol_and_url)
                     .ok_or_else(||ScrapeError::ExpectedFieldNotFound(symbol_and_url.clone()))?;
@@ -187,7 +179,7 @@ pub mod fda_scraper {
         let parsed = fs::read_to_string(file_path)
             .map_err(|x| ScrapeError::FileReadError(x))
             .map(|contents| Html::parse_document(&contents))
-            .and_then(|document| ScrapedCatalysts::new(&document, (Currency::from_str("$99.00").unwrap(), NaiveDate::parse_from_str("5/30/2022", "%m/%d/%Y").unwrap())));
+            .and_then(|document| ScrapedCatalysts::new(&document, (currency::USD::new("$99.00").unwrap(), NaiveDate::parse_from_str("5/30/2022", "%m/%d/%Y").unwrap())));
         match parsed {
             Ok(_) => info!("parsed = {:?}", parsed),
             Err(_) => error!("failed = {:?}", parsed),
@@ -204,7 +196,6 @@ pub mod fda_scraper {
         use super::*;
         use std::collections::btree_map::BTreeMap;
         use chrono::NaiveDate;
-        use currency::Currency;
 
 
         //TODO add test case given some time & price filtering
@@ -237,7 +228,7 @@ pub mod fda_scraper {
 
             //TODO lots of to_string here. Rust code smell that we should be using more lifetimes?
             let expected_row = ParsedRow {
-                price: Currency::from_str("$1.26").unwrap(),
+                price: currency::USD::new("$1.26").unwrap(),
                 url: "https://www.biopharmcatalyst.com/company/BTX".to_string(),
                 symbol: "BTX".to_string(),
                 catalyst_date: NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap(),
