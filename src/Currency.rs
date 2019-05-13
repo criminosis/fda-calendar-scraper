@@ -9,7 +9,6 @@ pub struct USD {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum USDParseError {
-    //TODO should these just be &`a str? So that way error msgs just need a long lived reference?
     NoDollarSign(String),
     DecimalWithInsufficientCents(String),
     InvalidStructure(String),
@@ -39,14 +38,11 @@ impl USD {
 
         let mut split: Vec<&str> = usd.split(".").collect();
         split.reverse(); //it's a vector so we need to flip it around
-        println!("post split {:?}", split);
 
         let dollars = match split.pop() {
             Some(x) => x,
             _ => return Err(InvalidStructure(usd_original.to_string()))
         };
-
-        println!("post pop {:?}", split);
 
         let dollars: Result<u64, core::num::ParseIntError> = (if dollars.len() == 0 {"0"} else {dollars}) .parse();
 
@@ -56,7 +52,6 @@ impl USD {
         };
 
         let cents = split.pop().map(|cents_original| {
-            println!("parsing {}", cents_original);
             if cents_original.len() != 2 {
                 return Err(DecimalWithInsufficientCents(usd_original.to_string()))
             }
@@ -80,7 +75,7 @@ impl USD {
 
 impl error::Error for USDParseError {
     fn cause(&self) -> Option<&error::Error> {
-        match self {
+        match *self {
             USDParseError::DecimalWithInsufficientCents(_) => None,
             USDParseError::InvalidStructure(_) => None,
             USDParseError::NoDollarSign(_) => None
@@ -90,10 +85,10 @@ impl error::Error for USDParseError {
 
 impl fmt::Display for USDParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            USDParseError::DecimalWithInsufficientCents(malformed_input) => write!(f, "Not enough decimal places {}", malformed_input),
-            USDParseError::InvalidStructure(malformed_input) => write!(f, "Invalid structure {}", malformed_input),
-            USDParseError::NoDollarSign(malformed_input) => write!(f, "No dollar sign {}", malformed_input),
+        match *self {
+            USDParseError::DecimalWithInsufficientCents(ref malformed_input) => write!(f, "Not enough decimal places {}", malformed_input),
+            USDParseError::InvalidStructure(ref malformed_input) => write!(f, "Invalid structure {}", malformed_input),
+            USDParseError::NoDollarSign(ref malformed_input) => write!(f, "No dollar sign {}", malformed_input),
         }
     }
 }

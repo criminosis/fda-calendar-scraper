@@ -11,6 +11,7 @@ pub mod fda_scraper {
     use std::io;
     use scraper::ElementRef;
     use super::currency;
+    use std::path::Path;
 
     #[derive(Debug, Eq, PartialEq)]
     struct ParsedRow {
@@ -31,7 +32,6 @@ pub mod fda_scraper {
         ExpectedFieldNotFound(Selector),
         DateParseFailure(chrono::format::ParseError),
         FileReadError(io::Error),
-        MalformedCurrency,
         CurrencyParseError(currency::USDParseError),
     }
 
@@ -40,7 +40,6 @@ pub mod fda_scraper {
             match *self {
                 ScrapeError::ExpectedFieldNotFound(ref e) => write!(f, "Didn't match css selector {:?}", e),
                 ScrapeError::InvalidSelector(ref e) => write!(f, "Malformed CSS Selector {:?}", e),
-                ScrapeError::MalformedCurrency => write!(f, "Malformed currency"),
                 // This is a wrapper, so defer to the underlying types' implementation of `fmt`.
                 //ScrapeError::InvalidSelector(ref e) => e.fmt(f),
 
@@ -60,7 +59,6 @@ pub mod fda_scraper {
                 // underlying type already implements the `Error` trait.
                 ScrapeError::ExpectedFieldNotFound(_) => None,
                 ScrapeError::InvalidSelector(_) => None,
-                ScrapeError::MalformedCurrency => None,
                 ScrapeError::DateParseFailure(ref e) => Some(e),
                 ScrapeError::FileReadError(ref e) => Some(e),
                 ScrapeError::CurrencyParseError(ref e) => Some(e),
@@ -68,29 +66,14 @@ pub mod fda_scraper {
         }
     }
 
-    //For each type of error we want to wrap we need to provide a From
-//    impl From<parser::ParseError<selectors::parser::SelectorParseErrorKind>> for ScrapeError {
-//        fn from(x: parser::ParseError<selectors::parser::SelectorParseErrorKind>) -> Self {
-//            ScrapeError(x)
-//        }
-//    }
-
-    /*
-    Iterating bounds of dataset
-     for ( ref key, ref value) in map.range((Included(("foo".to_string(), "c".to_string())), Excluded(("g".to_string(), "".to_string())))) {
-    println!("{:?}: {}", key, value);
-    }
-    */
+    //New type to make sure only PhaseLabels are used as the key type in ScrapedCatalysts. Zero cost abstraction
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+    struct PhaseLabel(String);
 
     #[derive(Debug, Eq, PartialEq)]
     pub struct ScrapedCatalysts {
         //TODO convert the string to PhaseLabel new type?
-        catalysts: BTreeMap<(String, NaiveDate), Vec<ParsedRow>>
-        //TODO we need to do some kind of filtering by the price?
-        //  The into() conversation, while cool, may be a bad match here because we want to also include price in filtering
-        //  We'd also want to apply a time filtering to say when to maybe early out the iterator (assuming it's date ordered)
-        //TODO implement SendableEmail to turn this returned type into an email to send
-        //  can we get the first entry, and then submap all the matching entries for a given phase, then tail map to the next batch?
+        catalysts: BTreeMap<(PhaseLabel, NaiveDate), Vec<ParsedRow>>
     }
 
     fn build_selector_for(css_selector: &str) -> Result<Selector, ScrapeError> {
@@ -129,7 +112,10 @@ pub mod fda_scraper {
 
     impl ScrapedCatalysts {
         //Should price_limit and retrieval_limit be some kind of predicates instead?
-        pub fn new(document: &Html, scrape_predicate: (currency::USD, NaiveDate)) -> Result<ScrapedCatalysts, ScrapeError> {
+        pub fn new(document: &Html, scrape_predicate: (&Fn(&currency::USD) -> bool, &Fn(&NaiveDate) -> bool)) -> Result<ScrapedCatalysts, ScrapeError> {
+
+            let (price_limit, date_limit) = scrape_predicate;
+
             let event_table_row_selector = build_selector_for("tr.js-tr.js-drug")?;
             let price = build_selector_for("div[class=price]")?;
             let symbol_and_url = build_selector_for("td a[href]")?;
@@ -146,15 +132,19 @@ pub mod fda_scraper {
                     .and_then(|x| currency::USD::new(&x)
                         .map_err(|x| ScrapeError::CurrencyParseError(x)))?;
 
+                let catalyst_date = select_first_text_from(&an_event_table_row, &catalyst_date)
+                    .and_then(|x| NaiveDate::parse_from_str(x, "%m/%d/%Y")
+                        .map_err(|x| ScrapeError::DateParseFailure(x)))?;
+
+                if !price_limit(&price) || !date_limit(&catalyst_date) {
+                    continue;
+                }
+
 
                 let url_symbol_ref = select_first_element_from(&an_event_table_row, &symbol_and_url)
                     .ok_or_else(||ScrapeError::ExpectedFieldNotFound(symbol_and_url.clone()))?;
                 let url = retrieve_attr_from(&url_symbol_ref, "href", &symbol_and_url)?;
                 let symbol = retrieve_text_from(&url_symbol_ref, &symbol_and_url)?;
-
-                let catalyst_date = select_first_text_from(&an_event_table_row, &catalyst_date)
-                    .and_then(|x| NaiveDate::parse_from_str(x, "%m/%d/%Y")
-                        .map_err(|x| ScrapeError::DateParseFailure(x)))?;
 
                 let drug_name = select_first_string(&an_event_table_row, &drug_name)?;
                 let drug_indication = select_first_string(&an_event_table_row, &drug_indication)?;
@@ -163,7 +153,7 @@ pub mod fda_scraper {
 
                 let phase_element = select_first_element_from(&an_event_table_row, &phase)
                     .ok_or_else(|| ScrapeError::ExpectedFieldNotFound(phase.clone()))?;
-                let phase_grouping = retrieve_attr_from(&phase_element, "data-value", &phase)?;
+                let phase_grouping = PhaseLabel(retrieve_attr_from(&phase_element, "data-value", &phase)?);
                 let phase = retrieve_text_from(&phase_element, &phase)?;
 
                 let to_insert = ParsedRow { price, url, symbol, catalyst_date, drug_name, drug_indication, catalyst_note, phase };
@@ -175,11 +165,17 @@ pub mod fda_scraper {
         }
     }
 
-    pub fn parse(file_path: &str) -> Result<ScrapedCatalysts, ScrapeError> {
+    pub fn parse_all_rows(file_path: &Path) -> Result<ScrapedCatalysts, ScrapeError> {
+        //Just return everything
+        parse_rows_with_predicates(file_path, &|_:&currency::USD| true, &|_:&NaiveDate| true)
+    }
+
+    pub fn parse_rows_with_predicates(file_path: &Path,
+                 price_predicate: &Fn(&currency::USD) -> bool, date_predicate: &Fn(&NaiveDate) -> bool) -> Result<ScrapedCatalysts, ScrapeError> {
         let parsed = fs::read_to_string(file_path)
             .map_err(|x| ScrapeError::FileReadError(x))
             .map(|contents| Html::parse_document(&contents))
-            .and_then(|document| ScrapedCatalysts::new(&document, (currency::USD::new("$99.00").unwrap(), NaiveDate::parse_from_str("5/30/2022", "%m/%d/%Y").unwrap())));
+            .and_then(|document| ScrapedCatalysts::new(&document, (price_predicate, date_predicate)));
         match parsed {
             Ok(_) => info!("parsed = {:?}", parsed),
             Err(_) => error!("failed = {:?}", parsed),
@@ -197,13 +193,10 @@ pub mod fda_scraper {
         use std::collections::btree_map::BTreeMap;
         use chrono::NaiveDate;
 
-
-        //TODO add test case given some time & price filtering
         #[test]
         #[should_panic(expected = "Failed to parse date")]
         fn parse_malformed_time() {
-            let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_date.html");
-            match parse(path.to_str().unwrap()) {
+            match parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_date.html")) {
                 Err(ScrapeError::DateParseFailure(_)) => panic!("Failed to parse date"),
                 x => panic!("Unexpected result {:?}", x)
             }
@@ -212,21 +205,14 @@ pub mod fda_scraper {
         #[test]
         #[should_panic(expected = "Failed to parse currency")]
         fn parse_malformed_price() {
-            let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_price.html");
-            match parse(path.to_str().unwrap()) {
-                Err(ScrapeError::MalformedCurrency) => panic!("Failed to parse currency"),
+            match parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_price.html")) {
+                Err(ScrapeError::CurrencyParseError(_)) => panic!("Failed to parse currency"),
                 x => panic!("Unexpected result {:?}", x)
             }
         }
 
-
         #[test]
-        fn parse_sample() {
-            let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_sample.html");
-            let actual = parse(path.to_str().unwrap());
-
-
-            //TODO lots of to_string here. Rust code smell that we should be using more lifetimes?
+        fn parse_single_row() {
             let expected_row = ParsedRow {
                 price: currency::USD::new("$1.26").unwrap(),
                 url: "https://www.biopharmcatalyst.com/company/BTX".to_string(),
@@ -239,16 +225,120 @@ pub mod fda_scraper {
             };
 
             let mut catalysts = BTreeMap::new();
-            catalysts.insert(("phase1.5".to_string(), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row]);
-            let expected = ScrapedCatalysts {
-                catalysts
+            catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row]);
+
+            assert_eq!(ScrapedCatalysts { catalysts },
+                       parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_sample.html")).unwrap());
+        }
+
+        #[test]
+        fn parse_multiple_rows() {
+            let expected_row1 = ParsedRow {
+                price: currency::USD::new("$1.26").unwrap(),
+                url: "https://www.biopharmcatalyst.com/company/BTX".to_string(),
+                symbol: "BTX".to_string(),
+                catalyst_date: NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap(),
+                drug_name: "OpRegen".to_string(),
+                drug_indication: "Dry age-related macular degeneration (AMD)".to_string(),
+                catalyst_note: "Phase 1/2 enrolment to be completed 2019. Updated data due  May 2, 2019,10:15am ET at ARVO.".to_string(),
+                phase: "Phase 1/2".to_string(),
             };
 
-            //TODO add another row with the same phase and date
-            //TODO add a row with a different phase
-            //Add range selection to demonstrate getting submap.
+            let expected_row2 = ParsedRow {
+                price: currency::USD::new("$173.16").unwrap(),
+                url: "https://www.biopharmcatalyst.com/company/GWPH".to_string(),
+                symbol: "GWPH".to_string(),
+                catalyst_date: NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap(),
+                drug_name: "Epidiolex GWPCARE2".to_string(),
+                drug_indication: "Dravet Syndrome".to_string(),
+                catalyst_note: "Phase 3 data to be presented at AAN in late-breaker May 7, 2019. Abstract embargoed until May 3, 2019.".to_string(),
+                phase: "Phase 3".to_string(),
+            };
 
-            assert_eq!(actual.unwrap(), expected);
+            let expected_row3 = ParsedRow {
+                price: currency::USD::new("$6.00").unwrap(),
+                url: "https://www.biopharmcatalyst.com/company/EYEN".to_string(),
+                symbol: "EYEN".to_string(),
+                catalyst_date: NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap(),
+                drug_name: "MicroStat".to_string(),
+                drug_indication: "Mydriasis - pupil dilation".to_string(),
+                catalyst_note: "Phase 3 trial met primary endpoint - January 31, 2019. Data from second trial also met primary endpoint - February 25, 2019. Detailed data due at (ASCRS) meeting May 3-7, 2019.".to_string(),
+                phase: "Phase 3".to_string(),
+            };
+
+            let mut catalysts = BTreeMap::new();
+            catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row1]);
+            catalysts.insert((PhaseLabel("phase3".to_string()), NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap()), vec![expected_row2, expected_row3]);
+
+            assert_eq!(ScrapedCatalysts { catalysts }, parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html")).unwrap());
+        }
+
+        #[test]
+        fn parse_with_price_ceiling() {
+            let expected_row1 = ParsedRow {
+                price: currency::USD::new("$1.26").unwrap(),
+                url: "https://www.biopharmcatalyst.com/company/BTX".to_string(),
+                symbol: "BTX".to_string(),
+                catalyst_date: NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap(),
+                drug_name: "OpRegen".to_string(),
+                drug_indication: "Dry age-related macular degeneration (AMD)".to_string(),
+                catalyst_note: "Phase 1/2 enrolment to be completed 2019. Updated data due  May 2, 2019,10:15am ET at ARVO.".to_string(),
+                phase: "Phase 1/2".to_string(),
+            };
+
+            let expected_row2 = ParsedRow {
+                price: currency::USD::new("$6.00").unwrap(),
+                url: "https://www.biopharmcatalyst.com/company/EYEN".to_string(),
+                symbol: "EYEN".to_string(),
+                catalyst_date: NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap(),
+                drug_name: "MicroStat".to_string(),
+                drug_indication: "Mydriasis - pupil dilation".to_string(),
+                catalyst_note: "Phase 3 trial met primary endpoint - January 31, 2019. Data from second trial also met primary endpoint - February 25, 2019. Detailed data due at (ASCRS) meeting May 3-7, 2019.".to_string(),
+                phase: "Phase 3".to_string(),
+            };
+
+            let mut catalysts = BTreeMap::new();
+            catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row1]);
+            catalysts.insert((PhaseLabel("phase3".to_string()), NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap()), vec![expected_row2]);
+
+            let price_limit = &currency::USD::new("$6").unwrap();
+            assert_eq!(ScrapedCatalysts { catalysts },
+                       parse_rows_with_predicates(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
+                                                  &|x| x <= price_limit,
+                                                  &|_| true).unwrap());
+        }
+
+        #[test]
+        fn parse_with_date_ceiling() {
+            let expected_row = ParsedRow {
+                price: currency::USD::new("$1.26").unwrap(),
+                url: "https://www.biopharmcatalyst.com/company/BTX".to_string(),
+                symbol: "BTX".to_string(),
+                catalyst_date: NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap(),
+                drug_name: "OpRegen".to_string(),
+                drug_indication: "Dry age-related macular degeneration (AMD)".to_string(),
+                catalyst_note: "Phase 1/2 enrolment to be completed 2019. Updated data due  May 2, 2019,10:15am ET at ARVO.".to_string(),
+                phase: "Phase 1/2".to_string(),
+            };
+
+            let mut catalysts = BTreeMap::new();
+            catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row]);
+
+            let date_limit = &NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap();
+            assert_eq!(ScrapedCatalysts { catalysts },
+                       parse_rows_with_predicates(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
+                                                  &|_| true,
+                                                  &|x| x < date_limit).unwrap());
+        }
+
+        #[test]
+        fn parse_with_price_and_date_ceiling() {
+            let price_limit = &currency::USD::new("$1").unwrap();
+            let date_limit = &NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap();
+            assert_eq!(ScrapedCatalysts { catalysts: BTreeMap::new()},
+                       parse_rows_with_predicates(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
+                                                  &|x| x <= price_limit,
+                                                  &|x| x < date_limit).unwrap());
         }
 
 //        #[test]
