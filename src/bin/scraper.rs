@@ -1,6 +1,3 @@
-
-
-//use fda_calendar_scraper::fda_scraper;
 use lettre::{SmtpClient, Transport, ClientSecurity, ClientTlsParameters, smtp};
 use lettre_email::Email;
 use native_tls::TlsConnector;
@@ -8,6 +5,13 @@ use lettre::smtp::authentication::{Mechanism, Credentials};
 use std::error::Error;
 use log::{info, warn, error, LevelFilter};
 use std::env;
+use std::fs::File;
+use std::io::Write;
+use chrono::NaiveDate;
+use fda_calendar_scraper::fda_scraper;
+use fda_calendar_scraper::html_render;
+use tempfile::NamedTempFile;
+use fda_calendar_scraper::currency;
 
 fn main() {
     env_logger::builder()
@@ -18,9 +22,30 @@ fn main() {
     info!("test logging");
     warn!("Test warn");
     error!("Test error");
-    send_email()
+    html_render::do_html()
+
+    //TODO we need an address to target to download
+    //Download to some tmp file
+    //Parse tmp file of web page
+    //Submit email
+    //Delete tmp file
 
     //TODO log how long it took to do a run. Separate out processing time and emailing time and then do total
+
+    //TODO delete the _download.html file that was previously used for testing
+
+    //TODO probably rename this to fda_calendar_scraper.rs
+}
+
+//"https://www.biopharmcatalyst.com/calendars/fda-calendar"
+fn do_scraping(address_to_scrape: &str, price_limit: &currency::USD, date_limit: &NaiveDate) {
+    //TODO handle web scraping? Maybe more testing here, passing in url, returning a SendEmail?
+    //TODO handle all the unwraps
+    let website_body = reqwest::get(address_to_scrape).unwrap().text().unwrap();
+
+    let mut downloaded_fda_events: NamedTempFile = tempfile::NamedTempFile::new().unwrap();
+    downloaded_fda_events.write_all(website_body.as_bytes()).unwrap();
+    let parsing_result = fda_scraper::parse_rows_with_predicates(downloaded_fda_events.path(), &|x| x<= price_limit, &|x| x< date_limit);
 }
 
 
