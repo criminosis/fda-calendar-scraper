@@ -1,4 +1,4 @@
-mod currency; //Declares that we have a module called currency in file currency.rs in src/
+pub mod currency; //Declares that we have a module called currency in file currency.rs in src/
 
 pub mod fda_scraper {
     use std::fs;
@@ -35,6 +35,18 @@ pub mod fda_scraper {
         CurrencyParseError(currency::USDParseError),
     }
 
+    impl From<currency::USDParseError> for ScrapeError {
+        fn from(e: currency::USDParseError) -> Self {
+            ScrapeError::CurrencyParseError(e)
+        }
+    }
+
+    impl From<chrono::format::ParseError> for ScrapeError {
+        fn from(e: chrono::format::ParseError) -> Self {
+            ScrapeError::DateParseFailure(e)
+        }
+    }
+
     impl fmt::Display for ScrapeError {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match *self {
@@ -52,11 +64,9 @@ pub mod fda_scraper {
     }
 
     impl error::Error for ScrapeError {
-        fn cause(&self) -> Option<&error::Error> {
+        //cause is depreciated, use source instead
+        fn source(&self) -> Option<&(dyn error::Error + 'static)> {
             match *self {
-                // The cause is the underlying implementation error type. Is implicitly
-                // cast to the trait object `&error::Error`. This works because the
-                // underlying type already implements the `Error` trait.
                 ScrapeError::ExpectedFieldNotFound(_) => None,
                 ScrapeError::InvalidSelector(_) => None,
                 ScrapeError::DateParseFailure(ref e) => Some(e),
@@ -72,43 +82,32 @@ pub mod fda_scraper {
 
     #[derive(Debug, Eq, PartialEq)]
     pub struct ScrapedCatalysts {
-        //TODO convert the string to PhaseLabel new type?
         catalysts: BTreeMap<(PhaseLabel, NaiveDate), Vec<ParsedRow>>
     }
 
-    fn build_selector_for(css_selector: &str) -> Result<Selector, ScrapeError> {
-        Selector::parse(css_selector)
-            .map_err(|x| ScrapeError::InvalidSelector(format!("Malformed CSS Selector {:?}", &x)))
+    fn build_selector_for(css_selector: &str) -> Selector {
+        Selector::parse(css_selector).expect(format!("Malformed CSS Selector {:?}", css_selector).as_str())
     }
 
     //for a lifetime called 'a is borrowed from the lifetime of the given element ref,
     // the returned &str's lifetime needs to be no longer than the given ElementRef
-    fn select_first_element_from<'a>(an_element_ref: &ElementRef<'a>, selector: &Selector) -> Option<ElementRef<'a>> {
-        an_element_ref.select(selector).nth(0)
+    fn select_first_element_from<'a>(an_element_ref: &ElementRef<'a>, selector: &Selector) -> Result<ElementRef<'a>, ScrapeError> {
+        //Ok or else so it only invokes clone when it needs to. Ok_or would clone each time even though it would be discarded
+        an_element_ref.select(selector).nth(0).ok_or_else(||ScrapeError::ExpectedFieldNotFound(selector.clone()))
     }
 
     fn select_first_text_from<'a>(an_element_ref: &ElementRef<'a>, selector: &Selector) -> Result<&'a str, ScrapeError> {
-        extraction_cleanup(select_first_element_from(an_element_ref, selector)
-                               .and_then(|x| x.text().next()), selector)
+        retrieve_text_from(&select_first_element_from(an_element_ref, selector)?, selector)
     }
 
-    fn extraction_cleanup<'a>(to_cleanup: Option<&'a str>, underlying_selector: &Selector) -> Result<&'a str, ScrapeError> {
-        to_cleanup.map(|x| x.trim())
-            //Ok or else so it only invokes clone when it needs to. Ok_or would clone each time even though it would be discarded
-            .ok_or_else(|| ScrapeError::ExpectedFieldNotFound(underlying_selector.clone()))
+    fn retrieve_text_from<'a>(an_element_ref: &ElementRef<'a>, underlying_selector: &Selector) -> Result<&'a str, ScrapeError> {
+        an_element_ref.text().next().map(|x| x.trim()).ok_or_else(||ScrapeError::ExpectedFieldNotFound(underlying_selector.clone()))
     }
 
-    fn retrieve_text_from<'a>(an_element_ref: &ElementRef<'a>, underlying_selector: &Selector) -> Result<String, ScrapeError> {
-        extraction_cleanup(an_element_ref.text().next(), underlying_selector).map(|x| x.to_string())
+    fn retrieve_attr_from<'a>(an_element_ref: &ElementRef<'a>, attr: &str, underlying_selector: &Selector) -> Result<&'a str, ScrapeError> {
+        an_element_ref.value().attr(attr).ok_or_else(||ScrapeError::ExpectedFieldNotFound(underlying_selector.clone()))
     }
 
-    fn retrieve_attr_from<'a>(an_element_ref: &ElementRef<'a>, attr: &str, underlying_selector: &Selector) -> Result<String, ScrapeError> {
-        extraction_cleanup(an_element_ref.value().attr(attr), underlying_selector).map(|x| x.to_string())
-    }
-
-    fn select_first_string<'a>(an_element_ref: &ElementRef<'a>, selector: &Selector) -> Result<String, ScrapeError> {
-        select_first_text_from(an_element_ref, selector).map(|x| x.to_string())
-    }
 
     impl ScrapedCatalysts {
         //Should price_limit and retrieval_limit be some kind of predicates instead?
@@ -116,45 +115,38 @@ pub mod fda_scraper {
 
             let (price_limit, date_limit) = scrape_predicate;
 
-            let event_table_row_selector = build_selector_for("tr.js-tr.js-drug")?;
-            let price = build_selector_for("div[class=price]")?;
-            let symbol_and_url = build_selector_for("td a[href]")?;
-            let catalyst_date = build_selector_for("time[class=catalyst-date]")?;
-            let drug_name = build_selector_for("strong[class=drug]")?;
-            let drug_indication = build_selector_for("div[class=indication]")?;
-            let catalyst_note = build_selector_for("div[class=catalyst-note]")?;
-            let phase = build_selector_for("td.js-td--stage[data-value]")?;
+            let event_table_row_selector = build_selector_for("tr.js-tr.js-drug");
+            let price = build_selector_for("div[class=price]");
+            let symbol_and_url = build_selector_for("td a[href]");
+            let catalyst_date = build_selector_for("time[class=catalyst-date]");
+            let drug_name = build_selector_for("strong[class=drug]");
+            let drug_indication = build_selector_for("div[class=indication]");
+            let catalyst_note = build_selector_for("div[class=catalyst-note]");
+            let phase = build_selector_for("td.js-td--stage[data-value]");
 
             let mut catalysts = BTreeMap::new();
             for an_event_table_row in document.select(&event_table_row_selector) {
 
-                let price = select_first_text_from(&an_event_table_row, &price)
-                    .and_then(|x| currency::USD::new(&x)
-                        .map_err(|x| ScrapeError::CurrencyParseError(x)))?;
+                let price = currency::USD::new(select_first_text_from(&an_event_table_row, &price)?)?;
 
-                let catalyst_date = select_first_text_from(&an_event_table_row, &catalyst_date)
-                    .and_then(|x| NaiveDate::parse_from_str(x, "%m/%d/%Y")
-                        .map_err(|x| ScrapeError::DateParseFailure(x)))?;
+                let catalyst_date = NaiveDate::parse_from_str(select_first_text_from(&an_event_table_row, &catalyst_date)?, "%m/%d/%Y")?;
 
                 if !price_limit(&price) || !date_limit(&catalyst_date) {
-                    continue;
+                    continue; //if this isn't within our date or price limits we should skip it
                 }
 
+                let url_symbol_ref = select_first_element_from(&an_event_table_row, &symbol_and_url)?;
+                let url = retrieve_attr_from(&url_symbol_ref, "href", &symbol_and_url)?.to_owned();
+                let symbol = retrieve_text_from(&url_symbol_ref, &symbol_and_url)?.to_owned();
 
-                let url_symbol_ref = select_first_element_from(&an_event_table_row, &symbol_and_url)
-                    .ok_or_else(||ScrapeError::ExpectedFieldNotFound(symbol_and_url.clone()))?;
-                let url = retrieve_attr_from(&url_symbol_ref, "href", &symbol_and_url)?;
-                let symbol = retrieve_text_from(&url_symbol_ref, &symbol_and_url)?;
-
-                let drug_name = select_first_string(&an_event_table_row, &drug_name)?;
-                let drug_indication = select_first_string(&an_event_table_row, &drug_indication)?;
-                let catalyst_note = select_first_string(&an_event_table_row, &catalyst_note)?;
+                let drug_name = select_first_text_from(&an_event_table_row, &drug_name)?.to_owned();
+                let drug_indication = select_first_text_from(&an_event_table_row, &drug_indication)?.to_owned();
+                let catalyst_note = select_first_text_from(&an_event_table_row, &catalyst_note)?.to_owned();
 
 
-                let phase_element = select_first_element_from(&an_event_table_row, &phase)
-                    .ok_or_else(|| ScrapeError::ExpectedFieldNotFound(phase.clone()))?;
-                let phase_grouping = PhaseLabel(retrieve_attr_from(&phase_element, "data-value", &phase)?);
-                let phase = retrieve_text_from(&phase_element, &phase)?;
+                let phase_element = select_first_element_from(&an_event_table_row, &phase)?;
+                let phase_grouping = PhaseLabel(retrieve_attr_from(&phase_element, "data-value", &phase)?.to_owned());
+                let phase = retrieve_text_from(&phase_element, &phase)?.to_owned();
 
                 let to_insert = ParsedRow { price, url, symbol, catalyst_date, drug_name, drug_indication, catalyst_note, phase };
 
@@ -164,6 +156,10 @@ pub mod fda_scraper {
             Ok(ScrapedCatalysts { catalysts })
         }
     }
+
+    //TODO Rust doesn't have method overloading, instead preferring to just make it trait based.
+    //We should create a common "parse" method again that takes in some CatalystPredicates trait
+    // Then this CatalystPredicate trait would be responsible for generating the predicate functions / default to return all
 
     pub fn parse_all_rows(file_path: &Path) -> Result<ScrapedCatalysts, ScrapeError> {
         //Just return everything
@@ -340,22 +336,5 @@ pub mod fda_scraper {
                                                   &|x| x <= price_limit,
                                                   &|x| x < date_limit).unwrap());
         }
-
-//        #[test]
-//        #[ignore]
-//        fn test() {
-//            let path = Path::new("test-resources/fda_calendar_sample_files/fda_calendar_download.html");
-//            parse(path.to_str().unwrap());
-//        }
-//        #[test]
-//        #[ignore]
-//        fn test2() {
-//            //Demo code for downloading the document, for testing this was stored after downloading
-//            let body = reqwest::get("https://www.biopharmcatalyst.com/calendars/fda-calendar").unwrap().text().unwrap();
-//
-//            let mut file = File::create("fda_calendar_download.html").unwrap();
-//            file.write_all(body.as_bytes()).unwrap();
-//            println!("body = {:?}", body);
-//        }
     }
 }
