@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upcoming Catalysts</title>
+</head>
+<body>
+<ul>
+    {% for catalyst in catalysts %}
+    <li>{{ (catalyst.0).0|e }}</li>
+    <li>{{ catalyst.1.get(0).unwrap().price|e }}</li>
+    {% endfor %}
+</ul>
+</body>
+</html>

@@ -12,6 +12,8 @@ use fda_calendar_scraper::fda_scraper;
 use fda_calendar_scraper::html_render;
 use tempfile::NamedTempFile;
 use fda_calendar_scraper::currency;
+use std::path::Path;
+use askama::Template;
 
 fn main() {
     env_logger::builder()
@@ -22,7 +24,8 @@ fn main() {
     info!("test logging");
     warn!("Test warn");
     error!("Test error");
-    html_render::do_html()
+    let x = fda_scraper::parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_sample.html")).unwrap();
+    println!("{}", x.render().unwrap());
 
     //TODO we need an address to target to download
     //Download to some tmp file

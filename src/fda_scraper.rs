@@ -9,10 +9,11 @@ use std::io;
 use scraper::ElementRef;
 use super::currency;
 use std::path::Path;
+use askama::Template;
 
 #[derive(Debug, Eq, PartialEq)]
-struct ParsedRow {
-    price: currency::USD,
+pub struct ParsedRow {
+    pub price: currency::USD,
     url: String,
     symbol: String,
     catalyst_date: NaiveDate,
@@ -77,7 +78,15 @@ impl error::Error for ScrapeError {
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct PhaseLabel(String);
 
-#[derive(Debug, Eq, PartialEq)]
+impl fmt::Display for PhaseLabel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Template)]
+// Template will generate the code...
+#[template(path = "scraped_catalysts_email_body.html")] // using the template in this path, relative
 pub struct ScrapedCatalysts {
     catalysts: BTreeMap<(PhaseLabel, NaiveDate), Vec<ParsedRow>>
 }
