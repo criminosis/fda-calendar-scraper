@@ -5,10 +5,31 @@
     <title>Upcoming Catalysts</title>
 </head>
 <body>
-<ul>
+<ul style="list-style: none;">
+    <h2>Upcoming Catalysts</h2>
+    <hr>
     {% for catalyst in catalysts %}
-    <li>{{ (catalyst.0).0|e }}</li>
-    <li>{{ catalyst.1.get(0).unwrap().price|e }}</li>
+    {% for rowData in catalyst.1 %}
+    <li style="margin:20px">
+        <table>
+            <tr>
+                <td>{{rowData.price}}</td>
+                <td>
+                    <a href="{{rowData.url}}">{{rowData.symbol}}</a>
+                </td>
+                <td>{{rowData.drug_name}}</td>
+                <td>{{rowData.catalyst_date}}</td>
+                <td>{{rowData.phase}}</td>
+            </tr>
+            <tr>
+                <td colspan="5">{{rowData.drug_indication}}</td>
+            </tr>
+            <tr>
+                <td colspan="5">{{rowData.catalyst_note}}</td>
+            </tr>
+        </table>
+    </li>
+    {% endfor %}
     {% endfor %}
 </ul>
 </body>

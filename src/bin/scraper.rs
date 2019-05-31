@@ -24,7 +24,7 @@ fn main() {
     info!("test logging");
     warn!("Test warn");
     error!("Test error");
-    let x = fda_scraper::parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_sample.html")).unwrap();
+    let x = fda_scraper::parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html")).unwrap();
     println!("{}", x.render().unwrap());
 
     //TODO we need an address to target to download

@@ -14,13 +14,13 @@ use askama::Template;
 #[derive(Debug, Eq, PartialEq)]
 pub struct ParsedRow {
     pub price: currency::USD,
-    url: String,
-    symbol: String,
-    catalyst_date: NaiveDate,
-    drug_name: String,
-    drug_indication: String,
-    catalyst_note: String,
-    phase: String,
+    pub url: String,
+    pub symbol: String,
+    pub catalyst_date: NaiveDate,
+    pub drug_name: String,
+    pub drug_indication: String,
+    pub catalyst_note: String,
+    pub phase: String,
 }
 
 //We have multiple errors possible, so enumerate them here so we have a common wrapping to match & deconstruct on
