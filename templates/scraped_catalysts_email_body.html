@@ -9,9 +9,19 @@
 <hr>
 <table style="margin:20px">
     {% for catalyst in catalysts %}
+    {% let priceColor -%}
+    {% if ((catalyst.0).0).0 == "phase1.5" || ((catalyst.0).0).0 == "phase1" -%}
+    {% let priceColor = "crimson" -%}
+    {% else if ((catalyst.0).0).0 == "phase2" -%}
+    {% let priceColor = "darkorange" -%}
+    {% else if ((catalyst.0).0).0 == "phase3" -%}
+    {% let priceColor = "gold" -%}
+    {% else -%}
+    {% let priceColor = "#black" -%}
+    {% endif -%}
     {% for rowData in catalyst.1 %}
     <tr>
-        <td>{{rowData.price}}</td>
+        <td style="color:{{priceColor}};text-shadow: #000 0px 0px 1px;-webkit-font-smoothing: antialiased;">{{rowData.price}}</td>
         <td>
             <a href="{{rowData.url}}">{{rowData.symbol}}</a>
         </td>
