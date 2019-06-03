@@ -39,7 +39,6 @@ fn main() {
     if let Ok(overall_duration) = overall_start_time.elapsed() {
         info!("Overall took {} millis", overall_duration.as_millis());
     }
-    //TODO delete the _download.html file that was previously used for testing
 
     //TODO probably rename this to fda_calendar_scraper.rs
 }
