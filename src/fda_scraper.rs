@@ -10,6 +10,9 @@ use scraper::ElementRef;
 use super::currency;
 use std::path::Path;
 use askama::Template;
+use std::time::SystemTime;
+use tempfile::NamedTempFile;
+use std::io::Write;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ParsedRow {
@@ -161,6 +164,34 @@ impl ScrapedCatalysts {
 
         Ok(ScrapedCatalysts { catalysts })
     }
+}
+
+//TODO testing. Can we mock reqwest::get(address_to_scrape)?
+pub fn do_scraping(address_to_scrape: &str, price_limit: &currency::USD, date_limit: &NaiveDate) -> Result<ScrapedCatalysts, ScrapeError> {
+    let download_start_time = SystemTime::now();
+    let website_body = reqwest::get(address_to_scrape).unwrap().text().unwrap();
+
+    //Duration can return errors if the system clock has been adjusted to prior to app start, etc
+    //Since that's unlikely use if let to just log if the parsing went as expected
+    // (we don't care for unexpected system clock events)
+    if let Ok(download_duration) = download_start_time.elapsed() {
+        info!("Download took {} millis", download_duration.as_millis());
+    }
+
+    let write_to_disk_start_time = SystemTime::now();
+    let mut downloaded_fda_events: NamedTempFile = tempfile::NamedTempFile::new().unwrap();
+    downloaded_fda_events.write_all(website_body.as_bytes()).unwrap();
+
+    if let Ok(write_duration) = write_to_disk_start_time.elapsed() {
+        info!("Write took {} millis", write_duration.as_millis());
+    }
+
+    let parsing_start_time = SystemTime::now();
+    let parsing_result = parse_rows_with_predicates(downloaded_fda_events.path(), &|x| x<= price_limit, &|x| x< date_limit);
+    if let Ok(parsing_duration) = parsing_start_time.elapsed() {
+        info!("Parsing took {} millis", parsing_duration.as_millis());
+    }
+    parsing_result
 }
 
 //TODO Rust doesn't have method overloading, instead preferring to just make it trait based.
