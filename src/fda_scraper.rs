@@ -120,7 +120,7 @@ fn retrieve_attr_from<'a>(an_element_ref: &ElementRef<'a>, attr: &str, underlyin
 
 impl ScrapedCatalysts {
     //Should price_limit and retrieval_limit be some kind of predicates instead?
-    pub fn new(document: &Html, scrape_predicate: (&Fn(&currency::USD) -> bool, &Fn(&NaiveDate) -> bool)) -> Result<ScrapedCatalysts, ScrapeError> {
+    fn new(document: &Html, scrape_predicate: (&Fn(&currency::USD) -> bool, &Fn(&NaiveDate) -> bool)) -> Result<ScrapedCatalysts, ScrapeError> {
 
         let (price_limit, date_limit) = scrape_predicate;
 
@@ -166,8 +166,7 @@ impl ScrapedCatalysts {
     }
 }
 
-//TODO testing. Can we mock reqwest::get(address_to_scrape)?
-pub fn do_scraping(address_to_scrape: &str, price_limit: &currency::USD, date_limit: &NaiveDate) -> Result<ScrapedCatalysts, ScrapeError> {
+pub fn do_scraping(address_to_scrape: &str, price_limit: currency::USD, date_limit: NaiveDate) -> Result<ScrapedCatalysts, ScrapeError> {
     let download_start_time = SystemTime::now();
     let website_body = reqwest::get(address_to_scrape).unwrap().text().unwrap();
 
@@ -187,28 +186,54 @@ pub fn do_scraping(address_to_scrape: &str, price_limit: &currency::USD, date_li
     }
 
     let parsing_start_time = SystemTime::now();
-    let parsing_result = parse_rows_with_predicates(downloaded_fda_events.path(), &|x| x<= price_limit, &|x| x< date_limit);
+    let parsing_result = parse_rows(downloaded_fda_events.path(),
+                                    ScrapePredicates::new().set_price_limit(price_limit).set_date_limit(date_limit));
     if let Ok(parsing_duration) = parsing_start_time.elapsed() {
         info!("Parsing took {} millis", parsing_duration.as_millis());
     }
     parsing_result
 }
 
-//TODO Rust doesn't have method overloading, instead preferring to just make it trait based.
-//We should create a common "parse" method again that takes in some CatalystPredicates trait
-// Then this CatalystPredicate trait would be responsible for generating the predicate functions / default to return all
-
-pub fn parse_all_rows(file_path: &Path) -> Result<ScrapedCatalysts, ScrapeError> {
-    //Just return everything
-    parse_rows_with_predicates(file_path, &|_:&currency::USD| true, &|_:&NaiveDate| true)
+pub struct ScrapePredicates {
+    price_limit: Option<currency::USD>,
+    date_limit: Option<NaiveDate>
 }
 
-pub fn parse_rows_with_predicates(file_path: &Path,
-                                  price_predicate: &Fn(&currency::USD) -> bool, date_predicate: &Fn(&NaiveDate) -> bool) -> Result<ScrapedCatalysts, ScrapeError> {
+impl ScrapePredicates {
+    pub fn new() -> ScrapePredicates {
+        ScrapePredicates {price_limit: Option::None, date_limit: Option::None}
+    }
+
+    pub fn set_price_limit(mut self, price_limit: currency::USD) -> Self {
+        self.price_limit = Option::Some(price_limit);
+        self
+    }
+
+    pub fn set_date_limit(mut self, date_limit: NaiveDate) -> Self {
+        self.date_limit = Option::Some(date_limit);
+        self
+    }
+
+    fn test_price(&self, test_value: &currency::USD) -> bool {
+        match &self.price_limit {
+            Some(price_limit) => test_value <= price_limit,
+            None => true //if no limit was set
+        }
+    }
+
+    fn test_date(&self, test_value: &NaiveDate) -> bool {
+        match &self.date_limit {
+            Some(date_limit) => test_value < date_limit,
+            None => true //if no limit was set
+        }
+    }
+}
+
+pub fn parse_rows(file_path: &Path, predicates: ScrapePredicates) -> Result<ScrapedCatalysts, ScrapeError> {
     let parsed = fs::read_to_string(file_path)
         .map_err(|x| ScrapeError::FileReadError(x))
         .map(|contents| Html::parse_document(&contents))
-        .and_then(|document| ScrapedCatalysts::new(&document, (price_predicate, date_predicate)));
+        .and_then(|document| ScrapedCatalysts::new(&document, (&|x| predicates.test_price(x), &|x| predicates.test_date(x))));
     match parsed {
         Ok(_) => info!("parsed = {:?}", parsed),
         Err(_) => error!("failed = {:?}", parsed),
@@ -229,7 +254,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Failed to parse date")]
     fn parse_malformed_time() {
-        match parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_date.html")) {
+        match parse_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_date.html"), ScrapePredicates::new()) {
             Err(ScrapeError::DateParseFailure(_)) => panic!("Failed to parse date"),
             x => panic!("Unexpected result {:?}", x)
         }
@@ -238,7 +263,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Failed to parse currency")]
     fn parse_malformed_price() {
-        match parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_price.html")) {
+        match parse_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_malformed_price.html"), ScrapePredicates::new()) {
             Err(ScrapeError::CurrencyParseError(_)) => panic!("Failed to parse currency"),
             x => panic!("Unexpected result {:?}", x)
         }
@@ -261,7 +286,7 @@ mod tests {
         catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row]);
 
         assert_eq!(ScrapedCatalysts { catalysts },
-                   parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_sample.html")).unwrap());
+                   parse_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_sample.html"), ScrapePredicates::new()).unwrap());
     }
 
     #[test]
@@ -303,7 +328,7 @@ mod tests {
         catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row1]);
         catalysts.insert((PhaseLabel("phase3".to_string()), NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap()), vec![expected_row2, expected_row3]);
 
-        assert_eq!(ScrapedCatalysts { catalysts }, parse_all_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html")).unwrap());
+        assert_eq!(ScrapedCatalysts { catalysts }, parse_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"), ScrapePredicates::new()).unwrap());
     }
 
     #[test]
@@ -334,11 +359,9 @@ mod tests {
         catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row1]);
         catalysts.insert((PhaseLabel("phase3".to_string()), NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap()), vec![expected_row2]);
 
-        let price_limit = &currency::USD::new("$6").unwrap();
         assert_eq!(ScrapedCatalysts { catalysts },
-                   parse_rows_with_predicates(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
-                                              &|x| x <= price_limit,
-                                              &|_| true).unwrap());
+                   parse_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
+                              ScrapePredicates::new().set_price_limit(currency::USD::new("$6").unwrap())).unwrap());
     }
 
     #[test]
@@ -357,20 +380,19 @@ mod tests {
         let mut catalysts = BTreeMap::new();
         catalysts.insert((PhaseLabel("phase1.5".to_string()), NaiveDate::parse_from_str("2019-05-02", "%Y-%m-%d").unwrap()), vec![expected_row]);
 
-        let date_limit = &NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap();
+        let date_limit = NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap();
         assert_eq!(ScrapedCatalysts { catalysts },
-                   parse_rows_with_predicates(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
-                                              &|_| true,
-                                              &|x| x < date_limit).unwrap());
+                   parse_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
+                                              ScrapePredicates::new().set_date_limit(date_limit)).unwrap());
     }
 
     #[test]
     fn parse_with_price_and_date_ceiling() {
-        let price_limit = &currency::USD::new("$1").unwrap();
-        let date_limit = &NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap();
+        let price_limit = currency::USD::new("$1").unwrap();
+        let date_limit = NaiveDate::parse_from_str("2019-05-03", "%Y-%m-%d").unwrap();
+
         assert_eq!(ScrapedCatalysts { catalysts: BTreeMap::new()},
-                   parse_rows_with_predicates(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
-                                              &|x| x <= price_limit,
-                                              &|x| x < date_limit).unwrap());
+                   parse_rows(Path::new("test-resources/fda_calendar_sample_files/fda_calendar_multiple_rows.html"),
+                                              ScrapePredicates::new().set_price_limit(price_limit).set_date_limit(date_limit)).unwrap());
     }
 }

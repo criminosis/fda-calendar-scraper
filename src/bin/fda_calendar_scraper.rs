@@ -25,7 +25,7 @@ fn main() {
 
     let date_limit = (Utc::today() + Duration::days(7)).naive_utc();
 
-    let scrape_results = fda_scraper::do_scraping("https://www.biopharmcatalyst.com/calendars/fda-calendar", &price_limit, &date_limit);
+    let scrape_results = fda_scraper::do_scraping("https://www.biopharmcatalyst.com/calendars/fda-calendar", price_limit, date_limit);
 
     match scrape_results {
         Ok(scrape_result) => send_email(&scrape_result),
